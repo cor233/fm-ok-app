@@ -1,5 +1,5 @@
 {
-  "code": 365,
-  "name": "3.6.5",
-  "desc": "* [Live]\n* Support parse tvg-id"
+  "code": 366,
+  "name": "3.6.6",
+  "desc": "* [Live]\n* Fix parse tvg-name"
 }
