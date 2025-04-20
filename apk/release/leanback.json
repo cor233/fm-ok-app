@@ -1,5 +1,5 @@
 {
-  "code": 368,
-  "name": "3.6.8",
-  "desc": "* [Media3]\n* Fix buffer bug"
+  "code": 369,
+  "name": "3.6.9",
+  "desc": "* [App]\n* Optimize get ip"
 }
