@@ -1,5 +1,5 @@
 {
-  "code": 370,
-  "name": "3.7.0",
-  "desc": "* [Vod]\n* Fix ending value bug"
+  "code": 371,
+  "name": "3.7.1",
+  "desc": "* [App]\n* Fix 302 crash"
 }
