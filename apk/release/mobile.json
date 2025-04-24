@@ -1,5 +1,5 @@
 {
-  "code": 374,
-  "name": "3.7.4",
-  "desc": "* [App]\n* 9978 -> 8964\n* Support rtspt://\n* Support proxy://\n* Remove rtsp setting"
+  "code": 375,
+  "name": "3.7.5",
+  "desc": "* [Media3]\n* Support proxy://"
 }
