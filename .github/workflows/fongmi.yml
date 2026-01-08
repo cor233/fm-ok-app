@@ -1,4 +1,4 @@
-name: 同步FongMi分支
+name: 同步FongMi
 
 on:
   schedule:
@@ -6,30 +6,32 @@ on:
   workflow_dispatch:
 
 jobs:
-  同步分支:
+  sync-fongmi-branch:
+    name: 同步FongMi
     runs-on: ubuntu-latest
     
     steps:
-    - name: 检出仓库
+    - name: 检出当前仓库
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.PAT_TOKEN }}
         ref: fongmi
+        fetch-depth: 0
     
-    - name: 添加上游仓库
+    - name: 添加上游远程仓库
       run: |
         git remote add upstream https://github.com/FongMi/Release.git
-        git fetch upstream
+        git fetch upstream fongmi
     
-    - name: 合并上游更新
+    - name: 重置到上游分支
       run: |
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
         git checkout fongmi
-        git merge upstream/fongmi --no-edit
+        git reset --hard upstream/fongmi
     
-    - name: 推送更改
+    - name: 强制推送到目标仓库
       run: |
-        git push origin fongmi
+        git push origin fongmi --force
       env:
         GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
