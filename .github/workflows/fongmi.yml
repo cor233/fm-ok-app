@@ -1,64 +1,31 @@
-name: 同步FongMi
+name: Sync FongMi Branch
 
 on:
   schedule:
-    - cron: '0 */4 * * *'  # 每4小时同步一次
+    - cron: '0 */4 * * *'
   workflow_dispatch:
-  push:
-    branches: [ fongmi ]
 
 jobs:
-  sync-fongmi-branch:
-    name: 同步FongMi
+  sync-fongmi:
     runs-on: ubuntu-latest
     
     steps:
-    - name: 检出当前仓库
+    - name: Checkout current repo
       uses: actions/checkout@v4
       with:
         ref: fongmi
-        fetch-depth: 1
-      continue-on-error: true
-    
-    - name: 初始化仓库（如果分支不存在）
-      if: steps.checkout.outcome == 'failure'
+        
+    - name: Add upstream remote
       run: |
-        git init
-        git remote add origin https://github.com/${{ github.repository }}.git
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
-        git checkout -b fongmi
-    
-    - name: 添加上游远程仓库
+        git remote add upstream https://github.com/FongMi/Release.git
+        git fetch upstream fongmi
+        
+    - name: Reset to upstream branch
       run: |
-        git remote add upstream https://github.com/FongMi/Release.git || true
-        git remote set-url upstream https://github.com/FongMi/Release.git
-        git fetch upstream fongmi --depth=1
-    
-    - name: 检查是否有更新
-      id: check_update
-      run: |
-        if git diff --quiet fongmi upstream/fongmi; then
-          echo "没有发现更新"
-          echo "has_update=false" >> $GITHUB_OUTPUT
-        else
-          echo "发现更新"
-          echo "has_update=true" >> $GITHUB_OUTPUT
-        fi
-    
-    - name: 重置到上游分支
-      if: steps.check_update.outputs.has_update == 'true'
-      run: |
+        git config user.name "github-actions"
+        git config user.email "github-actions@github.com"
         git reset --hard upstream/fongmi
-        echo "同步完成，最新提交："
-        git log -1 --oneline
-    
-    - name: 强制推送到目标仓库
-      if: steps.check_update.outputs.has_update == 'true'
+        
+    - name: Push to target repo
       run: |
         git push origin fongmi --force
-        echo "推送完成"
-    
-    - name: 跳过推送（无更新）
-      if: steps.check_update.outputs.has_update == 'false'
-      run: echo "无更新，跳过推送"
