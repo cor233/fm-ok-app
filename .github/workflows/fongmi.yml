@@ -1,5 +1,4 @@
-name: Sync FongMi Branch
-
+name: 同步FongMi
 on:
   schedule:
     - cron: '0 */4 * * *'
