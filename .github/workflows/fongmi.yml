@@ -14,14 +14,46 @@ jobs:
     - name: 检出当前仓库
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.PAT_TOKEN }}
         ref: fongmi
-        fetch-depth: 0
+        fetch-depth: 1
     
     - name: 添加上游远程仓库
       run: |
         git remote add upstream https://github.com/FongMi/Release.git
-        git fetch upstream fongmi
+        git fetch upstream fongmi --depth=1
+    
+    - name: 重置到上游分支
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git checkout fongmi
+        git reset --hard upstream/fongmi
+    
+    - name: 强制推送到目标仓库
+      run: |
+        git push origin fongmi --forcename: 同步FongMi
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-fongmi-branch:
+    name: 同步FongMi
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 检出当前仓库
+      uses: actions/checkout@v4
+      with:
+        ref: fongmi
+        fetch-depth: 1
+    
+    - name: 添加上游远程仓库
+      run: |
+        git remote add upstream https://github.com/FongMi/Release.git
+        git fetch upstream fongmi --depth=1
     
     - name: 重置到上游分支
       run: |
@@ -33,5 +65,3 @@ jobs:
     - name: 强制推送到目标仓库
       run: |
         git push origin fongmi --force
-      env:
-        GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
