@@ -1,0 +1,83 @@
+name: 同步Releases
+on:
+  workflow_dispatch:      # 手动触发
+  schedule:
+    - cron: '0 */4 * * *'   # 每小时检查一次
+
+jobs:
+  sync-releases:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+
+      - name: Get latest release from source repo (public)
+        id: get_release
+        env:
+          SOURCE_REPO: "lystv/fmapp"
+        run: |
+          # 调用 GitHub REST API 获取最新 Release 信息（无需认证）
+          API_URL="https://api.github.com/repos/${SOURCE_REPO}/releases/latest"
+          RELEASE_JSON=$(curl -s -H "Accept: application/vnd.github.v3+json" "$API_URL")
+
+          # 提取 tag 名称和 body
+          TAG_NAME=$(echo "$RELEASE_JSON" | jq -r '.tag_name // empty')
+          BODY=$(echo "$RELEASE_JSON" | jq -r '.body // ""')
+
+          if [ -z "$TAG_NAME" ]; then
+            echo "No releases found or source repo is private (needs token)."
+            exit 0
+          fi
+
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "body=$BODY" >> $GITHUB_OUTPUT
+
+          # 获取 assets 下载 URL 列表（直接使用 browser_download_url）
+          ASSET_URLS=$(echo "$RELEASE_JSON" | jq -r '.assets[]?.browser_download_url')
+          echo "asset_urls<<EOF" >> $GITHUB_OUTPUT
+          echo "$ASSET_URLS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check if release exists in target
+        id: check_exist
+        env:
+          GH_TOKEN: ${{ github.token }}   # 使用自动的 GITHUB_TOKEN
+        run: |
+          TAG="${{ steps.get_release.outputs.tag }}"
+          if gh release view "$TAG" --repo ${{ github.repository }} &>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create release in target
+        if: steps.check_exist.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.get_release.outputs.tag }}"
+          BODY="${{ steps.get_release.outputs.body }}"
+          gh release create "$TAG" --repo ${{ github.repository }} --title "$TAG" --notes "$BODY"
+
+      - name: Download and upload assets
+        if: steps.check_exist.outputs.exists == 'false'
+        run: |
+          TAG="${{ steps.get_release.outputs.tag }}"
+          # 创建临时目录
+          mkdir -p ./assets
+          cd ./assets
+
+          # 逐一下载 assets（直接使用公开的 browser_download_url）
+          echo "${{ steps.get_release.outputs.asset_urls }}" | while read url; do
+            if [ -n "$url" ]; then
+              curl -s -L -O "$url"
+            fi
+          done
+
+          # 上传到目标仓库（使用 GITHUB_TOKEN）
+          export GH_TOKEN=${{ github.token }}
+          for file in *; do
+            if [ -f "$file" ]; then
+              gh release upload "$TAG" "$file" --repo ${{ github.repository }} --clobber
+            fi
+          done
