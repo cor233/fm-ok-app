@@ -19,8 +19,6 @@ jobs:
           PAGE=1
           PER_PAGE=100
           RELEASES_JSON=""
-          
-          # 获取所有 Releases
           while true; do
             API_URL="https://api.github.com/repos/${SOURCE_REPO}/releases?per_page=${PER_PAGE}&page=${PAGE}"
             RESPONSE=$(curl -s -H "Accept: application/vnd.github.v3+json" "$API_URL")
@@ -34,8 +32,6 @@ jobs:
             fi
             PAGE=$((PAGE + 1))
           done
-          
-          # 按发布时间升序排序（旧 → 新）
           RELEASES_JSON=$(echo "$RELEASES_JSON" | jq 'sort_by(.published_at)')
           echo "$RELEASES_JSON" > releases.json
 
@@ -46,27 +42,19 @@ jobs:
           SOURCE_REPO="lystv/fmapp"
           TARGET_REPO="${{ github.repository }}"
           RELEASES_JSON=$(cat releases.json)
-          
           echo "$RELEASES_JSON" | jq -c '.[]' | while read release; do
             TAG_NAME=$(echo "$release" | jq -r '.tag_name')
             BODY=$(echo "$release" | jq -r '.body // ""')
-            
             echo "Processing release: $TAG_NAME"
-            
-            # 检查目标仓库是否已存在
             if gh release view "$TAG_NAME" --repo "$TARGET_REPO" &>/dev/null; then
               echo "Release $TAG_NAME already exists, skipping."
               continue
             fi
-            
-            # 创建 Release（使用临时文件传递多行正文）
             echo "$BODY" > body.txt
             gh release create "$TAG_NAME" \
               --repo "$TARGET_REPO" \
               --title "$TAG_NAME" \
               --notes-file body.txt
-            
-            # 下载并上传资产
             ASSET_URLS=$(echo "$release" | jq -r '.assets[]?.browser_download_url')
             if [ -n "$ASSET_URLS" ]; then
               mkdir -p "assets_$TAG_NAME"
