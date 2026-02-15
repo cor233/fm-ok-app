@@ -1,82 +1,111 @@
 name: 同步Releases
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:      # 手动触发
   schedule:
-    - cron: '0 */4 * * *'   # 每4小时一次
+    - cron: '0 */4 * * *' # 每4小时一次（可根据需要调整）
 
 jobs:
-  sync-releases:
+  sync-all-releases:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout target repo
         uses: actions/checkout@v4
 
-      - name: Get latest release from source repo (public)
-        id: get_release
+      - name: Get all releases from source repo (public)
+        id: get_all_releases
         run: |
           SOURCE_REPO="lystv/fmapp"
-          API_URL="https://api.github.com/repos/${SOURCE_REPO}/releases/latest"
-          RELEASE_JSON=$(curl -s -H "Accept: application/vnd.github.v3+json" "$API_URL")
-
-          TAG_NAME=$(echo "$RELEASE_JSON" | jq -r '.tag_name // empty')
-          if [ -z "$TAG_NAME" ]; then
-            echo "No releases found or source repo is private."
-            exit 0
-          fi
-          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
-
-          # 使用 Heredoc 处理多行 body
-          BODY=$(echo "$RELEASE_JSON" | jq -r '.body // ""')
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          echo "$BODY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          # 获取 assets 下载 URL
-          ASSET_URLS=$(echo "$RELEASE_JSON" | jq -r '.assets[]?.browser_download_url')
-          echo "asset_urls<<EOF" >> $GITHUB_OUTPUT
-          echo "$ASSET_URLS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Check if release exists in target
-        id: check_exist
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ steps.get_release.outputs.tag }}"
-          if gh release view "$TAG" --repo ${{ github.repository }} &>/dev/null; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create release in target
-        if: steps.check_exist.outputs.exists == 'false'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ steps.get_release.outputs.tag }}"
-          BODY="${{ steps.get_release.outputs.body }}"
-          gh release create "$TAG" --repo ${{ github.repository }} --title "$TAG" --notes "$BODY"
-
-      - name: Download and upload assets
-        if: steps.check_exist.outputs.exists == 'false'
-        run: |
-          TAG="${{ steps.get_release.outputs.tag }}"
-          mkdir -p ./assets
-          cd ./assets
-
-          # 下载 assets
-          echo "${{ steps.get_release.outputs.asset_urls }}" | while read url; do
-            if [ -n "$url" ]; then
-              curl -s -L -O "$url"
+          PAGE=1
+          PER_PAGE=100        # 每页最大100条
+          RELEASES_JSON=""
+          
+          # 循环获取所有分页
+          while true; do
+            API_URL="https://api.github.com/repos/${SOURCE_REPO}/releases?per_page=${PER_PAGE}&page=${PAGE}"
+            RESPONSE=$(curl -s -H "Accept: application/vnd.github.v3+json" "$API_URL")
+            
+            # 如果返回空数组，说明没有更多数据
+            if [ "$(echo "$RESPONSE" | jq length)" -eq 0 ]; then
+              break
             fi
+            
+            # 合并JSON数组（如果RELEASES_JSON为空则直接赋值，否则合并）
+            if [ -z "$RELEASES_JSON" ]; then
+              RELEASES_JSON="$RESPONSE"
+            else
+              RELEASES_JSON=$(echo "$RELEASES_JSON" "$RESPONSE" | jq -s 'add')
+            fi
+            
+            PAGE=$((PAGE + 1))
           done
+          
+          # 将完整JSON存入文件（避免环境变量长度限制）
+          echo "$RELEASES_JSON" > releases.json
+          
+          # 提取所有tag名称，供后续步骤使用
+          TAGS=$(echo "$RELEASES_JSON" | jq -r '.[].tag_name')
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "$TAGS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-          # 上传 assets
-          export GH_TOKEN=${{ github.token }}
-          for file in *; do
-            if [ -f "$file" ]; then
-              gh release upload "$TAG" "$file" --repo ${{ github.repository }} --clobber
+      - name: Process each release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SOURCE_REPO="lystv/fmapp"
+          TARGET_REPO="${{ github.repository }}"
+          
+          # 读取releases.json
+          RELEASES_JSON=$(cat releases.json)
+          
+          # 遍历每个Release（按tag_name循环）
+          echo "$RELEASES_JSON" | jq -c '.[]' | while read release; do
+            TAG_NAME=$(echo "$release" | jq -r '.tag_name')
+            BODY=$(echo "$release" | jq -r '.body // ""')
+            
+            echo "Processing release: $TAG_NAME"
+            
+            # 检查目标仓库是否已存在该Release
+            if gh release view "$TAG_NAME" --repo "$TARGET_REPO" &>/dev/null; then
+              echo "Release $TAG_NAME already exists in target, skipping."
+              continue
             fi
+            
+            # 在目标仓库创建Release
+            echo "Creating release $TAG_NAME in target..."
+            # 使用临时文件传递多行body（避免命令行长度问题）
+            echo "$BODY" > body.txt
+            gh release create "$TAG_NAME" \
+              --repo "$TARGET_REPO" \
+              --title "$TAG_NAME" \
+              --notes-file body.txt
+            
+            # 获取该Release的资产下载URL
+            ASSET_URLS=$(echo "$release" | jq -r '.assets[]?.browser_download_url')
+            if [ -n "$ASSET_URLS" ]; then
+              # 创建临时目录下载资产
+              mkdir -p assets_$TAG_NAME
+              cd assets_$TAG_NAME
+              
+              # 下载所有资产
+              echo "$ASSET_URLS" | while read url; do
+                if [ -n "$url" ]; then
+                  echo "Downloading asset: $url"
+                  curl -s -L -O "$url"
+                fi
+              done
+              
+              # 上传资产到目标Release
+              for file in *; do
+                if [ -f "$file" ]; then
+                  gh release upload "$TAG_NAME" "$file" --repo "$TARGET_REPO" --clobber
+                fi
+              done
+              
+              cd ..
+              rm -rf assets_$TAG_NAME
+            fi
+            # 清理临时文件
+            rm -f body.txt
           done
