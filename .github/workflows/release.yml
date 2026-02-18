@@ -11,10 +11,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout target repo
+      - name: 检出目标仓库
         uses: actions/checkout@v4
 
-      - name: Fetch and sort all releases from source
+      - name: 获取并排序源仓库的所有Releases
         id: get_releases
         run: |
           SOURCE_REPO="lystv/fmapp"
@@ -37,7 +37,7 @@ jobs:
           RELEASES_JSON=$(echo "$RELEASES_JSON" | jq 'sort_by(.published_at)')
           echo "$RELEASES_JSON" > releases.json
 
-      - name: Process each release in order
+      - name: 按顺序处理每个Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -47,9 +47,9 @@ jobs:
           echo "$RELEASES_JSON" | jq -c '.[]' | while read release; do
             TAG_NAME=$(echo "$release" | jq -r '.tag_name')
             BODY=$(echo "$release" | jq -r '.body // ""')
-            echo "Processing release: $TAG_NAME"
+            echo "正在处理 Release: $TAG_NAME"
             if gh release view "$TAG_NAME" --repo "$TARGET_REPO" &>/dev/null; then
-              echo "Release $TAG_NAME already exists, skipping."
+              echo "Release $TAG_NAME 已存在，跳过。"
               continue
             fi
             echo "$BODY" > body.txt
