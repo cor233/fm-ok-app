@@ -8,6 +8,8 @@ on:
 jobs:
   sync-all-releases:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout target repo
         uses: actions/checkout@v4
@@ -37,7 +39,7 @@ jobs:
 
       - name: Process each release in order
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SOURCE_REPO="lystv/fmapp"
           TARGET_REPO="${{ github.repository }}"
