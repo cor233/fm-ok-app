@@ -1,11 +1,9 @@
 name: 同步Releases
+
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * *'
-
-env:
-  TARGET_BRANCH: okjack
 
 jobs:
   sync-all-releases:
@@ -13,9 +11,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出目标仓库
+        uses: actions/checkout@v4
 
-      - name: 获取源仓库所有 Releases（按发布时间排序）
+      - name: 获取并排序源仓库的所有 Releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -26,35 +25,33 @@ jobs:
           while true; do
             API_URL="https://api.github.com/repos/${SOURCE_REPO}/releases?per_page=${PER_PAGE}&page=${PAGE}"
             RESPONSE=$(curl -s -H "Accept: application/vnd.github.v3+json" \
-              -H "Authorization: token $GH_TOKEN" "$API_URL")
+              -H "Authorization: token $GH_TOKEN" \
+              "$API_URL")
             if ! echo "$RESPONSE" | jq -e 'type == "array"' > /dev/null 2>&1; then
-              echo "错误：API 响应不是数组"
+              echo "错误：API 响应不是数组，退出。"
+              echo "响应内容：$RESPONSE"
               exit 1
             fi
-            [ "$(echo "$RESPONSE" | jq length)" -eq 0 ] && break
-            RELEASES_JSON=$(echo "$RELEASES_JSON" "$RESPONSE" | jq -s 'add')
+            if [ "$(echo "$RESPONSE" | jq length)" -eq 0 ]; then
+              break
+            fi
+            if [ -z "$RELEASES_JSON" ]; then
+              RELEASES_JSON="$RESPONSE"
+            else
+              RELEASES_JSON=$(echo "$RELEASES_JSON" "$RESPONSE" | jq -s 'add')
+            fi
             PAGE=$((PAGE + 1))
             sleep 0.5
           done
-          echo "$RELEASES_JSON" | jq 'sort_by(.published_at)' > releases.json
+          RELEASES_JSON=$(echo "$RELEASES_JSON" | jq 'sort_by(.published_at)')
+          echo "$RELEASES_JSON" > releases.json
 
-      - name: 同步每个 Release 到 okjack 分支
+      - name: 按顺序处理每个 Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SOURCE_REPO="lystv/fmapp"
           TARGET_REPO="${{ github.repository }}"
-          TARGET_BRANCH="${{ env.TARGET_BRANCH }}"
-
-          BRANCH_INFO=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$TARGET_REPO/branches/$TARGET_BRANCH")
-          TARGET_SHA=$(echo "$BRANCH_INFO" | jq -r '.commit.sha')
-          if [ "$TARGET_SHA" = "null" ]; then
-            echo "错误：分支 $TARGET_BRANCH 不存在"
-            exit 1
-          fi
-
           jq -c '.[]' releases.json | while read release; do
             TAG_NAME=$(echo "$release" | jq -r '.tag_name')
             TITLE=$(echo "$release" | jq -r '.name // .tag_name')
@@ -62,22 +59,34 @@ jobs:
             IS_PRERELEASE=$(echo "$release" | jq -r '.prerelease')
             IS_DRAFT=$(echo "$release" | jq -r '.draft')
 
+            echo "正在处理 Release: $TAG_NAME"
+
             HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               -H "Authorization: token $GH_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
               "https://api.github.com/repos/$TARGET_REPO/releases/tags/$TAG_NAME")
 
             if [ "$HTTP_STATUS" -eq 200 ]; then
-              echo "Release $TAG_NAME 已存在，跳过"
+              echo "Release $TAG_NAME 已存在，跳过。"
               continue
+            elif [ "$HTTP_STATUS" -ne 404 ]; then
+              echo "警告：检查 Release 时返回意外状态码 $HTTP_STATUS，将尝试创建。"
             fi
 
-            CREATE_CMD="gh release create \"$TAG_NAME\" --repo \"$TARGET_REPO\" --title \"$TITLE\" --target \"$TARGET_SHA\""
-            [ -n "$BODY" ] && echo "$BODY" > body.txt && CREATE_CMD="$CREATE_CMD --notes-file body.txt"
-            [ "$IS_PRERELEASE" = "true" ] && CREATE_CMD="$CREATE_CMD --prerelease"
-            [ "$IS_DRAFT" = "true" ] && CREATE_CMD="$CREATE_CMD --draft"
+            CREATE_CMD="gh release create \"$TAG_NAME\" --repo \"$TARGET_REPO\" --title \"$TITLE\""
+            if [ -n "$BODY" ]; then
+              echo "$BODY" > body.txt
+              CREATE_CMD="$CREATE_CMD --notes-file body.txt"
+            fi
+            if [ "$IS_PRERELEASE" = "true" ]; then
+              CREATE_CMD="$CREATE_CMD --prerelease"
+            fi
+            if [ "$IS_DRAFT" = "true" ]; then
+              CREATE_CMD="$CREATE_CMD --draft"
+            fi
 
             if ! eval "$CREATE_CMD"; then
-              echo "创建 Release $TAG_NAME 失败"
+              echo "创建 Release $TAG_NAME 失败，退出。"
               exit 1
             fi
 
@@ -86,14 +95,22 @@ jobs:
               TEMP_DIR=$(mktemp -d)
               cd "$TEMP_DIR"
               echo "$ASSET_URLS" | while read url; do
-                [ -z "$url" ] && continue
-                echo "下载 $url"
-                curl -f -s -L -O "$url" || echo "下载失败: $url"
+                if [ -n "$url" ]; then
+                  echo "下载附件: $url"
+                  if curl -f -s -L -O "$url"; then
+                    echo "下载成功"
+                  else
+                    echo "下载失败: $url"
+                  fi
+                fi
               done
               for file in *; do
-                [ -f "$file" ] && gh release upload "$TAG_NAME" "$file" --repo "$TARGET_REPO" --clobber
+                if [ -f "$file" ]; then
+                  gh release upload "$TAG_NAME" "$file" --repo "$TARGET_REPO" --clobber
+                fi
               done
-              cd .. && rm -rf "$TEMP_DIR"
+              cd ..
+              rm -rf "$TEMP_DIR"
             fi
             rm -f body.txt
           done
