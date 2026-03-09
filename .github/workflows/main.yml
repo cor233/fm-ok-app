@@ -1,43 +1,48 @@
 name: Delete All Releases and Tags
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # 仅允许手动触发，防止意外执行
 
 jobs:
   delete:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete all Releases via API
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 获取所有历史，以便操作所有 tag
+
+      - name: Delete all Releases
         env:
-          GH_TOKEN: ${{ secrets.PAT }}
+          GH_TOKEN: ${{ secrets.PAT }}   # 使用 PAT 进行认证
         run: |
           echo "Fetching all releases..."
+          # 列出所有 release ID
           releases=$(gh release list --limit 1000 --json id --jq '.[].id')
           if [ -z "$releases" ]; then
             echo "No releases found."
           else
             for id in $releases; do
               echo "Deleting release ID: $id"
-              gh release delete "$id" --yes
+              gh release delete "$id" --yes   # --yes 跳过确认
             done
           fi
 
-      - name: Delete all Tags via API
+      - name: Delete all Tags
         env:
           GH_TOKEN: ${{ secrets.PAT }}
         run: |
-          echo "Fetching all tags via API..."
-          # 获取所有 tag refs
-          tags=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/git/refs/tags" | jq -r '.[].ref')
+          echo "Fetching all tags..."
+          # 列出所有 tag 名称（本地和远程）
+          tags=$(git tag -l)
           if [ -z "$tags" ]; then
             echo "No tags found."
           else
-            for ref in $tags; do
-              echo "Deleting $ref"
-              curl -X DELETE -H "Authorization: token $GH_TOKEN" \
-                "https://api.github.com/repos/${{ github.repository }}/git/$ref"
-              # 可选：添加短暂延迟避免触发速率限制
-              sleep 0.5
+            for tag in $tags; do
+              echo "Deleting tag: $tag"
+              # 删除本地 tag
+              git tag -d "$tag"
+              # 删除远程 tag (通过推送空引用)
+              git push origin ":refs/tags/$tag"
             done
           fi
