@@ -1,35 +1,50 @@
-name: Delete All Releases and Tags (Robust)
+name: Delete All Releases and Tags
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 手动触发，防止意外运行
+
+permissions:
+  contents: write  # 需要写入权限以删除 release 和 tag
 
 jobs:
   delete:
     runs-on: ubuntu-latest
-    timeout-minutes: 60   # 根据数量调整
     steps:
-      - name: Delete all Releases via API
-        env:
-          GH_TOKEN: ${{ secrets.PAT }}
-        run: |
-          echo "Fetching and deleting all releases..."
-          # 使用 --paginate 自动处理分页
-          gh api repos/${{ github.repository }}/releases --paginate \
-            --jq '.[].id' | while read id; do
-            echo "Deleting release $id"
-            gh release delete "$id" --yes || echo "Failed to delete $id"
-            sleep 0.2
-          done
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取所有 tag 历史
 
-      - name: Delete all Tags via API
+      - name: Delete all releases
         env:
-          GH_TOKEN: ${{ secrets.PAT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Fetching and deleting all tags..."
-          # 获取所有 tag refs
-          gh api repos/${{ github.repository }}/git/refs/tags --paginate \
-            --jq '.[].ref' | while read ref; do
-            echo "Deleting ref $ref"
-            gh api -X DELETE "repos/${{ github.repository }}/git/$ref" || echo "Failed to delete $ref"
-            sleep 0.2
-          done
+          echo "Fetching all releases..."
+          releases=$(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+          if [ -z "$releases" ]; then
+            echo "No releases found."
+          else
+            for tag in $releases; do
+              echo "Deleting release for tag: $tag"
+              gh release delete "$tag" --yes
+            done
+          fi
+
+      - name: Delete all tags (local and remote)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching all remote tags..."
+          git fetch --tags
+          tags=$(git tag -l)
+          if [ -z "$tags" ]; then
+            echo "No tags found."
+          else
+            for tag in $tags; do
+              echo "Deleting tag: $tag"
+              # 删除本地 tag
+              git tag -d "$tag"
+              # 删除远程 tag (通过推送空引用)
+              git push origin ":refs/tags/$tag" || echo "Failed to delete remote tag $tag (may not exist)"
+            done
+          fi
