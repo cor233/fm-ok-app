@@ -2,7 +2,7 @@ name: 同步ok
 
 on:
   schedule:
-    - cron: '0 */4 * * *'
+   - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       force_sync:
