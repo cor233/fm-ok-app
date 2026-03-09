@@ -1,48 +1,35 @@
-name: Delete All Releases and Tags
+name: Delete All Releases and Tags (Robust)
 
 on:
-  workflow_dispatch:   # 仅允许手动触发，防止意外执行
+  workflow_dispatch:
 
 jobs:
   delete:
     runs-on: ubuntu-latest
+    timeout-minutes: 60   # 根据数量调整
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # 获取所有历史，以便操作所有 tag
-
-      - name: Delete all Releases
-        env:
-          GH_TOKEN: ${{ secrets.PAT }}   # 使用 PAT 进行认证
-        run: |
-          echo "Fetching all releases..."
-          # 列出所有 release ID
-          releases=$(gh release list --limit 1000 --json id --jq '.[].id')
-          if [ -z "$releases" ]; then
-            echo "No releases found."
-          else
-            for id in $releases; do
-              echo "Deleting release ID: $id"
-              gh release delete "$id" --yes   # --yes 跳过确认
-            done
-          fi
-
-      - name: Delete all Tags
+      - name: Delete all Releases via API
         env:
           GH_TOKEN: ${{ secrets.PAT }}
         run: |
-          echo "Fetching all tags..."
-          # 列出所有 tag 名称（本地和远程）
-          tags=$(git tag -l)
-          if [ -z "$tags" ]; then
-            echo "No tags found."
-          else
-            for tag in $tags; do
-              echo "Deleting tag: $tag"
-              # 删除本地 tag
-              git tag -d "$tag"
-              # 删除远程 tag (通过推送空引用)
-              git push origin ":refs/tags/$tag"
-            done
-          fi
+          echo "Fetching and deleting all releases..."
+          # 使用 --paginate 自动处理分页
+          gh api repos/${{ github.repository }}/releases --paginate \
+            --jq '.[].id' | while read id; do
+            echo "Deleting release $id"
+            gh release delete "$id" --yes || echo "Failed to delete $id"
+            sleep 0.2
+          done
+
+      - name: Delete all Tags via API
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+        run: |
+          echo "Fetching and deleting all tags..."
+          # 获取所有 tag refs
+          gh api repos/${{ github.repository }}/git/refs/tags --paginate \
+            --jq '.[].ref' | while read ref; do
+            echo "Deleting ref $ref"
+            gh api -X DELETE "repos/${{ github.repository }}/git/$ref" || echo "Failed to delete $ref"
+            sleep 0.2
+          done
